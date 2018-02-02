@@ -20,7 +20,7 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
   ;       
   ;       Please see Gagné et al. 2017 (ApJ, XX, XX) for more detail.
   ;       
-  ;       An online version of this tool is available for 1-object queries at http://www.astro.umontreal.ca/~gagne/banyansigma.php.
+  ;       An online version of this tool is available for 1-object queries at http://www.exoplanetes.umontreal.ca/banyan/banyansigma.php.
   ;       
   ; REQUIREMENTS:
   ;       (1) A fits file containing the parameters of the multivariate Gaussian models of each Bayesian hypothesis must be included
