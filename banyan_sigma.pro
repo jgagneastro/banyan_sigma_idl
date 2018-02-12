@@ -543,10 +543,10 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
     dist_for_this_hypothesis = s.dist
     edist_for_this_hypothesis = s.edist
     if keyword_set(constraint_dist_per_hyp) then begin
-      gdist_per_hyp = where(finite(constraint_dist_per_hyp[*,i]), ngdist_per_hyp)
+      gdist_per_hyp = where(finite(dist_per_hyp_arr[*,i]), ngdist_per_hyp)
       if ngdist_per_hyp ne 0L then begin
-        dist_for_this_hypothesis = constraint_dist_per_hyp[gdist_per_hyp,i]
-        edist_for_this_hypothesis = constraint_edist_per_hyp[gdist_per_hyp,i]
+        dist_for_this_hypothesis = dist_per_hyp_arr[gdist_per_hyp,i]
+        edist_for_this_hypothesis = edist_per_hyp_arr[gdist_per_hyp,i]
       endif
     endif
     
@@ -573,7 +573,6 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
         dist_for_this_hypothesis_ci = dist_for_this_hypothesis[ind_from:ind_to]
         edist_for_this_hypothesis_ci = edist_for_this_hypothesis[ind_from:ind_to]
         nobj_ci = n_elements(s_ci)
-        
         
         ;Solve the BANYAN-SIGMA integrals for one hypothesis and N targets
         output_str_ci = banyan_sigma_solve_multivar(s_ci.ra, s_ci.dec, s_ci.pmra, s_ci.pmdec, s_ci.epmra, s_ci.epmdec, RV_MES=s_ci.rv, ERV_MES=s_ci.erv, $
