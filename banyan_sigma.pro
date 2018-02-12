@@ -443,10 +443,8 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
   if keyword_set(unit_priors) then $
     parameters_str.ln_prior = 0d0
   
-  ;Determine whether a trigonometric distance or a per-hypothesis distance constraint was set 
-  if keyword_set(constraint_dist_per_hyp) then $
-    distance_is_set = finite(s.dist) or finite(total(dist_per_hyp_arr,2)) else $
-    distance_is_set = finite(s.dist)
+  ;Determine whether a trigonometric distance was set 
+  distance_is_set = finite(s.dist)
   
   ;Adjust the priors
   g_pm = where(~finite(s.rv) and ~distance_is_set, ng_pm)
