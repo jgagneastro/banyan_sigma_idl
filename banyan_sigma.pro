@@ -199,7 +199,7 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
   
   forward_function banyan_sigma_solve_multivar, nan_str, alog_sum_2d, mrdfits, remove, uniq_unsorted, add_tags
   
-  ;Maximal numer of targets to be put at once in the RAM for the analytical solving of the BANYAN-SIGMA integrals
+  ;Maximal number of targets to be put at once in the RAM for the analytical solving of the BANYAN-SIGMA integrals
   ; Using a number that is too high will cause IDL to crash
   if ~keyword_set(ntargets_max) then $
     ntargets_max = 1d6
@@ -512,7 +512,7 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
     both_distances_set = where(finite(s.dist) and finite(total(dist_per_hyp_arr,2,/nan)), nboth_distances_set)
   if nboth_distances_set ne 0L then begin
     ones_hyp = make_array(nhyp,value=1d0,/double)
-    ln_prob_dist_differences = -((s[both_distances_set].dist#ones_hyp)-dist_per_hyp_arr[both_distances_set,*])^2/(2d0*(((s[both_distance_set].edist^2d0)#ones_hyp)+edist_per_hyp_arr[both_distances_set,*]^2))
+    ln_prob_dist_differences = -((s[both_distances_set].dist#ones_hyp)-dist_per_hyp_arr[both_distances_set,*])^2/(2d0*(((s[both_distances_set].edist^2d0)#ones_hyp)+edist_per_hyp_arr[both_distances_set,*]^2))
     
     ;Treat these values as priors so normalize them with the field hypotheses (because they get applied only on young associations)
     gnorm = where(strpos(strupcase(hypotheses),'FIELD') ne -1L, ngnorm)
