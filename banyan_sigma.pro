@@ -214,7 +214,7 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
     message, ' If CONSTRAINT_DIST_PER_HYP is specified, CONSTRAINT_EDIST_PER_HYP must also be specified !', continue=keyword_set(override_errors)
   
   ;Default column names
-  default_column_names = {RA:'RA',DEC:'DEC',PMRA:'PMRA',PMDEC:'PMDEC',$
+  default_column_names = {NAME:'NAME',RA:'RA',DEC:'DEC',PMRA:'PMRA',PMDEC:'PMDEC',$
     EPMRA:'EPMRA',EPMDEC:'EPMDEC'}
   if keyword_set(use_rv) then $
     add_tags, temporary(default_column_names), ['RV','ERV'], ['''RV''','''ERV'''], default_column_names
@@ -268,7 +268,6 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
     s = replicate(s, nobj)
     
     ;Assign information from stars_data in the correct s entries
-    ;stop
     column_tags = tag_names(column_names)
     for i=0L, n_tags(column_names)-1L do begin
       gsi = where(tag_names(s) eq column_tags[i], ngsi)
