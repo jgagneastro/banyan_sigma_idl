@@ -437,10 +437,6 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
     if nbad ne 0L then $
       message, ' Some of the specified CONSTRAINT_EDIST_PER_HYP are not finite where CONSTRAINT_DIST_PER_HYP are finite !', continue=keyword_set(override_errors)
     
-    ;Check that either all or none of the distance constraints are finite for a given object
-    bad = where((finite(total(dist_per_hyp_arr,2,/nan)) and ~finite(total(dist_per_hyp_arr,2))) or (finite(total(edist_per_hyp_arr,2,/nan)) and ~finite(total(edist_per_hyp_arr,2))), nbad)
-    if nbad ne 0L then $
-      message, ' The CONSTRAINT_DIST_PER_HYP and CONSTRAINT_EDIST_PER_HYP values must be all finite or all non-finite for a given star !', continue=keyword_set(override_errors)
   endif
   
   ;Override priors to all ones if UNIT_PRIORS is set
@@ -449,7 +445,7 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
   
   ;Determine whether a trigonometric distance or a per-hypothesis distance constraint was set 
   if keyword_set(constraint_dist_per_hyp) then $
-    distance_is_set = finite(s.dist) or finite(total(dist_per_hyp_arr,2,/nan)) else $
+    distance_is_set = finite(s.dist) or finite(total(dist_per_hyp_arr,2)) else $
     distance_is_set = finite(s.dist)
   
   ;Adjust the priors
@@ -521,8 +517,13 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
       norm_priors_1d = alog_sum_2d(ln_prob_dist_differences[*,gnorm],dim=2)
     ln_prob_dist_differences -= (norm_priors_1d#ones_hyp)
     
-    ;Apply these values on the priors
-    ln_priors_nd[both_distances_set,*] += ln_prob_dist_differences
+    ;Apply these values on the priors only where finite
+    gfinite = where(finite(ln_prob_dist_differences), ngfinite)
+    if ngfinite ne 0L then begin
+      tmp = ln_priors_nd[both_distances_set,*]
+      tmp[gfinite] += ln_prob_dist_differences[gfinite]
+      ln_priors_nd[both_distances_set,*] = tmp
+    endif
     
     ;Remove the per-hypothesis distance constraints on these particular objects and just keep the trigonometric distances
      dist_per_hyp_arr[both_distances_set,*] = !values.d_nan
@@ -545,8 +546,8 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
     if keyword_set(constraint_dist_per_hyp) then begin
       gdist_per_hyp = where(finite(dist_per_hyp_arr[*,i]), ngdist_per_hyp)
       if ngdist_per_hyp ne 0L then begin
-        dist_for_this_hypothesis = dist_per_hyp_arr[gdist_per_hyp,i]
-        edist_for_this_hypothesis = edist_per_hyp_arr[gdist_per_hyp,i]
+        dist_for_this_hypothesis[gdist_per_hyp] = dist_per_hyp_arr[gdist_per_hyp,i]
+        edist_for_this_hypothesis[gdist_per_hyp] = edist_per_hyp_arr[gdist_per_hyp,i]
       endif
     endif
     
