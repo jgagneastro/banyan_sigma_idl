@@ -420,11 +420,11 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
     edist_per_hyp_arr = make_array(nobj,nhyp,value=!values.d_nan,/double)
     for i=0L, nhyp-1L do begin
       gtag = where(dist_per_hyp_tags eq hypotheses[i] or dist_per_hyp_tags eq '_'+hypotheses[i], ngtag)
-      dist_per_hyp_arr[*,i] = double(constraint_dist_per_hyp.(gprior[0L]))
+      dist_per_hyp_arr[*,i] = double(constraint_dist_per_hyp.(gtag[0L]))
     endfor
     for i=0L, nhyp-1L do begin
       gtag = where(edist_per_hyp_tags eq hypotheses[i] or edist_per_hyp_tags eq '_'+hypotheses[i], ngtag)
-      edist_per_hyp_arr[*,i] = double(constraint_edist_per_hyp.(gprior[0L]))
+      edist_per_hyp_arr[*,i] = double(constraint_edist_per_hyp.(gtag[0L]))
     endfor
     
     ;Check that all distance constraints are physical
