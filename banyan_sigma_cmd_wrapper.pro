@@ -49,8 +49,6 @@ Function banyan_sigma_cmd_wrapper, stars_data, DATA_FILE=data_file, column_names
     message, ' The tag '+strtrim(column_names.EYMAG)+' was not specified in the input structure !'
   
   ;Call the CMD => Distance function
-  ;cmd_output = call_function(cmd_function, stars_data.(xmag1tag[0L]), stars_data.(xmag2tag[0L]), stars_data.(ymagtag[0L]), stars_data.(exmag1tag[0L]), stars_data.(exmag2tag[0L]), stars_data.(eymagtag[0L]))
-  
   cmd_output = banyan_sigma_cmd_to_distance(data_file, stars_data.(xmag1tag[0L]), stars_data.(xmag2tag[0L]), stars_data.(ymagtag[0L]), stars_data.(exmag1tag[0L]), stars_data.(exmag2tag[0L]), stars_data.(eymagtag[0L]))
   
   constraint_dist_per_hyp = cmd_output.CONSTRAINT_DIST_PER_HYP
