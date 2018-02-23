@@ -81,6 +81,11 @@ Function banyan_sigma_cmd_to_distance, data_file, xmag1, xmag2, ymag, exmag1, ex
     out.(gtag[0L]) = phot_dist[*,gbatch[0L]]
     out_error.(gtag[0L]) = e_phot_dist[*,gbatch[0L]]
   endfor
+  
+;  bad = where(~finite(phot_dist) and finite(e_phot_dist), nbad)
+;  if nbad ne 0L then stop
+;  bad = where(finite(phot_dist) and ~finite(e_phot_dist), nbad)
+;  if nbad ne 0L then stop
 
   return, {CONSTRAINT_DIST_PER_HYP:out,CONSTRAINT_EDIST_PER_HYP:out_error}
 
