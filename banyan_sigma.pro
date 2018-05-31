@@ -3,7 +3,8 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
   RA=ra,DEC=dec,PMRA=pmra,PMDEC=pmdec,EPMRA=epmra,EPMDEC=epmdec,DIST=dist,EDIST=edist,RV=rv,ERV=erv, $
   PSIRA=psira,PSIDEC=psidec,EPSIRA=epsira,EPSIDEC=epsidec, PLX=plx, EPLX=eplx, $
   CONSTRAINT_DIST_PER_HYP=constraint_dist_per_hyp, CONSTRAINT_EDIST_PER_HYP=constraint_edist_per_hyp, $
-  USE_RV=use_rv, USE_DIST=use_dist, USE_PLX=use_plx, USE_PSI=use_psi, OVERRIDE_ERRORS=override_errors
+  USE_RV=use_rv, USE_DIST=use_dist, USE_PLX=use_plx, USE_PSI=use_psi, OVERRIDE_ERRORS=override_errors, $
+  STRUC=s, CUSTOM_MODELS=custom_models, NORM_OUTPUT_NOPRIOR=norm_output, NORM_OUTPUT_PRIOR=norm_output_prior
   
   ;+
   ; NAME:
@@ -135,7 +136,11 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
   ;                   This keyword is useful for including spectro-photometric distance constraints that depend on the age of the young association or field.
   ;       CONSTRAINT_EDIST_PER_HYP - An IDL structure (or array of IDL structures when several objects are analyzed) that contains a measurement
   ;                   error on the distance constraint (in pc). Each of the Bayesian hypotheses must be included as structure tags and the
-  ;                   distance error must be specified as its associated scalar value.  
+  ;                   distance error must be specified as its associated scalar value.
+  ;       CUSTOM_MODELS - An IDL structure array with custom kinematic models to be used by BANYAN Sigma.
+  ;       STRUC - (Output keyword) stores the kinematic data used by BANYAN Sigma in an IDL structure array.  
+  ;       NORM_OUTPUT_NOPRIOR - (Output keyword) stores the normalized probabilities without priors
+  ;       NORM_OUTPUT_PRIOR - (Output keyword) stores the normalized probabilities with priors
   ;
   ; OPTIONAL INPUT KEYWORD:
   ;       /UNIT_PRIORS - If this keyword is set, all default priors are set to 1 (but they are still overrided by manual priors input with the keyword LN_PRIORS).
@@ -262,7 +267,7 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
   ;Read the input structure and avoid changing it
   s = {name:'NaN',RA:!values.d_nan,DEC:!values.d_nan,PMRA:!values.f_nan,PMDEC:!values.f_nan,$
     EPMRA:!values.f_nan,EPMDEC:!values.f_nan,RV:!values.f_nan,ERV:!values.f_nan,DIST:!values.f_nan,$
-    EDIST:!values.f_nan,PSIRA:0d0,PSIDEC:0d0,EPSIRA:0d0,EPSIDEC:0d0}
+    EDIST:!values.f_nan,PSIRA:0d0,PSIDEC:0d0,EPSIRA:0d0,EPSIDEC:0d0,PLX:!values.d_nan,EPLX:!values.d_nan}
   if keyword_set(stars_data) then begin
     nobj = n_elements(stars_data)
     s = replicate(s, nobj)
@@ -272,7 +277,6 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
     for i=0L, n_tags(column_names)-1L do begin
       gsi = where(tag_names(s) eq column_tags[i], ngsi)
       if ngsi eq 0L then continue
-      ;!!!!!!!!! JG NOV 6 2017 THE STRUPCASE WAS MISSING BELOW, MAKE SURE THIS IS FIXED IN PYTHON TOO !!!!!!!!!!!!
       gstarsi = where(tag_names(stars_data) eq strupcase(column_names.(i)), ngstarsi)
       if ngstarsi eq 0L then continue
       s.(gsi[0L]) = stars_data.(gstarsi[0L])
@@ -382,14 +386,19 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
   if nbad ne 0L then $
     message, ' Some RV values are specified without ERV !', continue=keyword_set(override_errors)
   
-  ;Locate the parameters file
-  parameters_file = file_dirname(routine_filepath())+path_sep()+'data'+path_sep()+'banyan_sigma_parameters.fits'
-  if ~file_test(parameters_file) then $
-    message, ' The multivariate Gaussian parameters file could not be found ! Please make sure that you did not move "'+path_sep()+'data'+path_sep()+'banyan_sigma_parameters.fits" from the same path as the IDL routine banyan_sigma.pro !', continue=keyword_set(override_errors)
-  
-  ;Read the multivariate Gaussian parameters describing the spatial-kinematic structure of all hypotheses
-  parameters_str = mrdfits(parameters_file,1,/silent)
-  parameters_str.name = strtrim(parameters_str.name,2)
+  ;If custom models are used do not read the default models
+  if keyword_set(custom_models) then begin
+    parameters_str = custom_models
+    parameters_str.name = strtrim(parameters_str.name,2)
+  endif else begin
+    ;Locate the parameters file
+    parameters_file = file_dirname(routine_filepath())+path_sep()+'data'+path_sep()+'banyan_sigma_parameters.fits'
+    if ~file_test(parameters_file) then $
+      message, ' The multivariate Gaussian parameters file could not be found ! Please make sure that you did not move "'+path_sep()+'data'+path_sep()+'banyan_sigma_parameters.fits" from the same path as the IDL routine banyan_sigma.pro !', continue=keyword_set(override_errors)
+    ;Read the multivariate Gaussian parameters describing the spatial-kinematic structure of all hypotheses
+    parameters_str = mrdfits(parameters_file,1,/silent)
+    parameters_str.name = strtrim(parameters_str.name,2)
+  endelse
   npar = n_elements(parameters_str)
   
   ;Replace parameter names that start with a number to avoid problems with using them as structure tags
@@ -579,7 +588,7 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
           PSIDEC=s_ci.psidec, EPSIRA=s_ci.epsira, EPSIDEC=s_ci.epsidec, LNP_ONLY=lnp_only, NO_XYZ=no_xyz)
         
         if keyword_set(lnp_only) then begin
-          all_lnprobs_hypi[ind_from:ind_to,gaussi] = output_str_ci.LN_P
+          all_lnprobs_hypi[ind_from:ind_to,gaussi] = output_str_ci
           continue
         endif
         
@@ -660,11 +669,9 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
   endfor
   
   ;Useful shortcuts to calculate normalized probabilities
-  ovec = make_array(nobj,value=1d0,/double)
   hvec = make_array(nhyp,value=1d0,/double)
-  ovec = !NULL
   
-  ;Store probabilities in a single array if needed
+  ;Store probabilities in a single array if it was not done before
   if ~keyword_set(lnp_only) then $
     all_lnprobs = output_str_all.LN_P
   
@@ -673,15 +680,21 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
   
   ;Compute [0,1] probabilities
   norm_output = exp(ln_norm_output)
+  stop
   
   ;Identify hypotheses that correspond to moving groups or associations
   yind = where(strpos(strupcase(hypotheses),'FIELD') eq -1L, nyind, complement=ffind, ncomplement=nffind)
   
-  ;Create an array of normalized YMG probabilities (no field)
-  ln_norm_output_only_ymg = all_lnprobs[*,yind]-(alog_sum_2d(all_lnprobs[*,yind],dim=2L)#(hvec[yind]))
-
-  ;Calculate the weighted YMG prior
-  ln_prior_moving_groups = alog_sum_2d(ln_priors_nd[*,yind]+ln_norm_output_only_ymg,dim=2L)
+  ;If only 1 young association is being tested, then just use that prior
+  if nyind eq 1L then begin
+    ln_prior_moving_groups = ln_priors_nd[*,yind]
+    ln_norm_output_only_ymg = replicate(
+  endif else begin
+    ;Create an array of normalized YMG probabilities (no field)
+    ln_norm_output_only_ymg = all_lnprobs[*,yind]-(alog_sum_2d(reform(all_lnprobs[*,yind],nobj,nyind),dim=2L)#(hvec[yind]))
+    ;Calculate the weighted YMG prior
+    ln_prior_moving_groups = alog_sum_2d(ln_priors_nd[*,yind]+ln_norm_output_only_ymg,dim=2L)
+  endelse
   
   ;Weight the priors w/r/t the Bayesian probabilities and project these priors onto the field. This is a way to
   ; avoid having the priors change the relative moving group probabilities, as their goal is strictly to
@@ -719,7 +732,7 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
       if ngyindi gt 1 then $
         message, ' Bayesian hypothesis "'+hypotheses[yind[yindi]]+'" was found more than once in the performance metrics file ! Performance metrics should never be calculated for the FIELD hypothesis.'
       if ngyindi eq 0 then $
-        message, ' Bayesian hypothesis "'+hypotheses[yind[yindi]]+'" was not found in the performance metrics file ! Its performance metrics will not be calculated. This will cancel out performance metrics calculations for any object with a >= 1% probability in that group.'
+        message, ' Bayesian hypothesis "'+hypotheses[yind[yindi]]+'" was not found in the performance metrics file ! Its performance metrics will not be calculated. This will cancel out performance metrics calculations for any object with a >= 1% probability in that group.',/continue
       
       probs_yindi = exp(ln_norm_output_prior[*,yindi] - alog_sum_2d([[ln_norm_output_prior[*,yindi]],[ln_norm_output_prior[*,ffind[0L]]]],dim=2))
       
@@ -842,8 +855,8 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
     if void eq 0 then message, ' An execution statement has failed !'
     if nbad ne 0L then bbad = [bbad, bad]
   endfor
-  norm_output = !NULL
-  norm_output_prior = !NULL
+  ;norm_output = !NULL
+  ;norm_output_prior = !NULL
   output_str_all = !NULL
 
   ;Loop on objects that is needed for tags that depend on the individual winning hypotheses
