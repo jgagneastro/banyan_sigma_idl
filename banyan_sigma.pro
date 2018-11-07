@@ -680,7 +680,6 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
   
   ;Compute [0,1] probabilities
   norm_output = exp(ln_norm_output)
-  stop
   
   ;Identify hypotheses that correspond to moving groups or associations
   yind = where(strpos(strupcase(hypotheses),'FIELD') eq -1L, nyind, complement=ffind, ncomplement=nffind)
@@ -688,7 +687,7 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
   ;If only 1 young association is being tested, then just use that prior
   if nyind eq 1L then begin
     ln_prior_moving_groups = ln_priors_nd[*,yind]
-    ln_norm_output_only_ymg = replicate(
+    ln_norm_output_only_ymg = replicate(0d0,nobj)
   endif else begin
     ;Create an array of normalized YMG probabilities (no field)
     ln_norm_output_only_ymg = all_lnprobs[*,yind]-(alog_sum_2d(reform(all_lnprobs[*,yind],nobj,nyind),dim=2L)#(hvec[yind]))
@@ -731,8 +730,8 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
       gyindi = where(strtrim(metrics_str.name,2) eq hypotheses[yind[yindi]] or '_'+strtrim(metrics_str.name,2) eq hypotheses[yind[yindi]], ngyindi)
       if ngyindi gt 1 then $
         message, ' Bayesian hypothesis "'+hypotheses[yind[yindi]]+'" was found more than once in the performance metrics file ! Performance metrics should never be calculated for the FIELD hypothesis.'
-      if ngyindi eq 0 then $
-        message, ' Bayesian hypothesis "'+hypotheses[yind[yindi]]+'" was not found in the performance metrics file ! Its performance metrics will not be calculated. This will cancel out performance metrics calculations for any object with a >= 1% probability in that group.',/continue
+;      if ngyindi eq 0 then $
+;        message, ' Bayesian hypothesis "'+hypotheses[yind[yindi]]+'" was not found in the performance metrics file ! Its performance metrics will not be calculated. This will cancel out performance metrics calculations for any object with a >= 1% probability in that group.',/continue
       
       probs_yindi = exp(ln_norm_output_prior[*,yindi] - alog_sum_2d([[ln_norm_output_prior[*,yindi]],[ln_norm_output_prior[*,ffind[0L]]]],dim=2))
       
