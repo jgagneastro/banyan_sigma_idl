@@ -2,6 +2,9 @@ Function alog_sum_2d, x, DIM=dim
   ;This function was written by J. Gagne to sum a 2D array X along a given axis in log space.
   ;X must already be a natural log quantity.
   ;The dimension index works like that of total.pro.
+  stop
+  if dim eq 1 then $
+    message, 'This version of the code is broken when dim != 2. Use alog_sum_2d_fixed'
   
   forward_function alog_sum
   

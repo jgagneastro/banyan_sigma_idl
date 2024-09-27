@@ -179,7 +179,6 @@ for i=0,nel-1 do  begin
 	 
 endfor
 
-
 if strlen(strng) gt 3 then begin
     strng = strng + "}"
     res = execute(strng)
@@ -191,6 +190,7 @@ if strlen(strng) gt 3 then begin
     endelse
   
 endif
+ 
  
 endelse
 if keyword_set(structyp) then $

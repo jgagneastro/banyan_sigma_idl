@@ -1,7 +1,7 @@
 Function banyan_sigma_solve_multivar, ra, dec, pmra, pmdec, epmra, epmdec, PRECISION_MATRIX=precision_matrix_in, $
   PRECISION_DETERM=precision_determ, CENTER_VECTOR=center_vector, RV_MES=rv_mes, ERV_MES=erv_mes, DIST_MES=dist_mes, $
   EDIST_MES=edist_mes, ASSOCIATION_STRUCTURE=association_structure, PSIRA=psira, PSIDEC=psidec, EPSIRA=epsira, $
-  EPSIDEC=epsidec, LNP_ONLY=lnp_only, NO_XYZ=no_xyz
+  EPSIDEC=epsidec, LNP_ONLY=lnp_only, NO_XYZ=no_xyz, MONTE_CARLO=monte_carlo
 
   ;+
   ; NAME:
@@ -76,6 +76,8 @@ Function banyan_sigma_solve_multivar, ra, dec, pmra, pmdec, epmra, epmdec, PRECI
   ;       /NO_XYZ - If this keyword is set, the width of the spatial components of the multivariate Gaussian will be widened by a large
   ;                 factor, so that the XYZ components are effectively ignored. This keyword must be used with extreme caution as it will
   ;                 generate a significant number of false-positives and confusion between the young associations.
+  ;       /MONTE_CARLO - If this keyword is set, the error bars on proper motion will not be propagated to make the code
+  ;                      more efficient in contexts where a Monte Carlo is used to propagate the error bars on PM instead.
   ;
   ; OUTPUTS:
   ;       This routine outputs an array of N IDL structures (where N is the number of stars analyzed), each of which contains:
@@ -107,6 +109,7 @@ Function banyan_sigma_solve_multivar, ra, dec, pmra, pmdec, epmra, epmdec, PRECI
   ;
   ; MODIFICATION HISTORY:
   ;       WRITTEN, Jonathan Gagne, October, 25 2017
+  ;       Added /monte_carlo keyword, Jonathan Gagne, May 27, 2024 
   ;-
   
   forward_function matrix_multiply_square_act, matrix_vector_product_vct, matrix_vector_product, matrix_vector_error_product, inner_product_multi, $
@@ -237,81 +240,95 @@ Function banyan_sigma_solve_multivar, ra, dec, pmra, pmdec, epmra, epmdec, PRECI
   gamma = (OMEGA_GAMMA*OMEGA_TAU/OMEGA_OMEGA-GAMMA_TAU)
   d_opt = (sqrt(gamma^2+32d0*beta)-gamma)/(4d0*beta)
   rv_opt = (4d0-GAMMA_GAMMA*d_opt^2+GAMMA_TAU*d_opt)/(OMEGA_GAMMA*d_opt)
-
-  ;Propagate measurement errors if they are set
-  determ_precision = replicate(determ_precision,nobj)
-  if determ_precision[0L] lt 0 then $
-    message, 'Ill-defined value for the precision matrix determinant (covariance matrix has <= 0 determinant) !'
   
-  ;Propagate measurement errors to XYZ and UVW
-  xyz_errors, ra, dec, d_opt, 0d0, 0d0, 0d0, X, Y, Z, EX, EY, EZ
-  uvw_errors, ra, dec, pmra, pmdec, rv_opt, d_opt, 0d0, 0d0, epmra, epmdec, 0d0, 0d0, U, V, W, EU, EV, EW
+  ;Skip this step if a Monte Carlo is performed on PMs to avoid these approximations
+  ; Skipping this step will make BANYAN Sigma more efficient
+  ;if ~keyword_set(monte_carlo) then begin
+    
+    ;Propagate measurement errors if they are set
+    determ_precision = replicate(determ_precision,nobj)
+    if determ_precision[0L] lt 0 then $
+      message, 'Ill-defined value for the precision matrix determinant (covariance matrix has <= 0 determinant) !'
+    
+    ;Propagate measurement errors to XYZ and UVW
+    xyz_errors, ra, dec, d_opt, 0d0, 0d0, 0d0, X, Y, Z, EX, EY, EZ
+    uvw_errors, ra, dec, pmra, pmdec, rv_opt, d_opt, 0d0, 0d0, epmra, epmdec, 0d0, 0d0, U, V, W, EU, EV, EW
+    
+    ;Define a vector of inflation for the covariance matrix
+    inflate_vec = [[EX],[EY],[EZ],[EU],[EV],[EW]]
+    
+    ;Include the error bars on PSI_VEC. Since it shifts the moving group UVW centers, its error bars are added in quadrature here
+    inflate_vec = sqrt(inflate_vec^2d0 + PSI_vector^2d0)
+    
+    covariance_matrix = la_invert(precision_matrix)
+    diag_covariance = diag_matrix(covariance_matrix)
+    
+    ;Apply diagonal inflation on the covariance matrix while avoiding a for loop
+    ones_vector1 = make_array(nobj,value=1d0,/double)
+    inflation_factors = 1d0 + inflate_vec^2/(ones_vector1#diag_covariance)
+    inflation_determ = exp(total(alog(inflation_factors),2L,/nan))
+    
+    ;Avoid singular matrices
+    bad = where(inflation_determ le 0, nbad)
+    if nbad ne 0 then message, 'Ill-defined value for the precision matrix determinant (covariance matrix has <= 0 determinant) !'
+    
+    ;Inflate the precision matrices
+    precision_matrix_inflated = matrix_inflation_multiple(precision_matrix, 1d0/sqrt(inflation_factors))
+    
+    ;Calculate new determinants for the now multiple precision matrices
+    determ_precision = determ_precision0/inflation_determ
   
-  ;Define a vector of inflation for the covariance matrix
-  inflate_vec = [[EX],[EY],[EZ],[EU],[EV],[EW]]
-  
-  ;Include the error bars on PSI_VEC. Since it shifts the moving group UVW centers, its error bars are added in quadrature here
-  inflate_vec = sqrt(inflate_vec^2d0 + PSI_vector^2d0)
-  
-  covariance_matrix = la_invert(precision_matrix)
-  diag_covariance = diag_matrix(covariance_matrix)
-  
-  ;Apply diagonal inflation on the covariance matrix while avoiding a for loop
-  ones_vector1 = make_array(nobj,value=1d0,/double)
-  inflation_factors = 1d0 + inflate_vec^2/(ones_vector1#diag_covariance)
-  inflation_determ = exp(total(alog(inflation_factors),2L,/nan))
-  
-  ;Avoid singular matrices
-  bad = where(inflation_determ le 0, nbad)
-  if nbad ne 0 then message, 'Ill-defined value for the precision matrix determinant (covariance matrix has <= 0 determinant) !'
-  
-  ;Inflate the precision matrices
-  precision_matrix_inflated = matrix_inflation_multiple(precision_matrix, 1d0/sqrt(inflation_factors))
-  
-  ;Calculate new determinants for the now multiple precision matrices
-  determ_precision = determ_precision0/inflation_determ
-
-  ;Update the BANYAN moments
-  OMEGA_OMEGA = inner_product_multi_variablemetric(OMEGA_vector, OMEGA_vector, precision_matrix_inflated)
-  GAMMA_GAMMA = inner_product_multi_variablemetric(GAMMA_vector, GAMMA_vector, precision_matrix_inflated)
-  OMEGA_GAMMA = inner_product_multi_variablemetric(OMEGA_vector, GAMMA_vector, precision_matrix_inflated)
-  OMEGA_TAU = inner_product_multi_variablemetric(OMEGA_vector, TAU_vector, precision_matrix_inflated)
-  GAMMA_TAU = inner_product_multi_variablemetric(GAMMA_vector, TAU_vector, precision_matrix_inflated)
-  TAU_TAU = inner_product_multi_variablemetric(TAU_vector, TAU_vector, precision_matrix_inflated)
-  
-  ;Include RV and distance measurements and uncertainties, where applicable
-  if keyword_set(dist_mes) then begin
-    good = where(finite(dist_mes), ngood)
-    if ngood ne 0L then begin
-      GAMMA_GAMMA[good] += 1d0/edist_mes[good]^2
-      GAMMA_TAU[good] += dist_mes[good]/edist_mes[good]^2
-      TAU_TAU[good] += dist_mes[good]^2/edist_mes[good]^2
+    ;Update the BANYAN moments
+    OMEGA_OMEGA = inner_product_multi_variablemetric(OMEGA_vector, OMEGA_vector, precision_matrix_inflated)
+    GAMMA_GAMMA = inner_product_multi_variablemetric(GAMMA_vector, GAMMA_vector, precision_matrix_inflated)
+    OMEGA_GAMMA = inner_product_multi_variablemetric(OMEGA_vector, GAMMA_vector, precision_matrix_inflated)
+    OMEGA_TAU = inner_product_multi_variablemetric(OMEGA_vector, TAU_vector, precision_matrix_inflated)
+    GAMMA_TAU = inner_product_multi_variablemetric(GAMMA_vector, TAU_vector, precision_matrix_inflated)
+    TAU_TAU = inner_product_multi_variablemetric(TAU_vector, TAU_vector, precision_matrix_inflated)
+    
+    ;Include RV and distance measurements and uncertainties, where applicable
+    if keyword_set(dist_mes) then begin
+      good = where(finite(dist_mes), ngood)
+      if ngood ne 0L then begin
+        GAMMA_GAMMA[good] += 1d0/edist_mes[good]^2
+        GAMMA_TAU[good] += dist_mes[good]/edist_mes[good]^2
+        TAU_TAU[good] += dist_mes[good]^2/edist_mes[good]^2
+      endif
     endif
-  endif
-  if keyword_set(rv_mes) then begin
-    good = where(finite(rv_mes), ngood)
-    if ngood ne 0L then begin
-      OMEGA_OMEGA[good] += 1d0/erv_mes[good]^2
-      OMEGA_TAU[good] += rv_mes[good]/erv_mes[good]^2
-      TAU_TAU[good] += rv_mes[good]^2/erv_mes[good]^2
+    if keyword_set(rv_mes) then begin
+      good = where(finite(rv_mes), ngood)
+      if ngood ne 0L then begin
+        OMEGA_OMEGA[good] += 1d0/erv_mes[good]^2
+        OMEGA_TAU[good] += rv_mes[good]/erv_mes[good]^2
+        TAU_TAU[good] += rv_mes[good]^2/erv_mes[good]^2
+      endif
     endif
-  endif
-
-  ;Calculate more relevant quantities
-  beta = (GAMMA_GAMMA-OMEGA_GAMMA^2/OMEGA_OMEGA)/2d0
-  gamma = (OMEGA_GAMMA*OMEGA_TAU/OMEGA_OMEGA-GAMMA_TAU)
-  if min(beta,/nan) lt 0 then message, 'Ill-defined value for beta !'
   
-  ;Update optimal distance and RV
-  d_opt = (sqrt(gamma^2d0+32d0*beta)-gamma)/(4d0*beta)
-  rv_opt = (4d0-GAMMA_GAMMA*d_opt^2+GAMMA_TAU*d_opt)/(OMEGA_GAMMA*d_opt)
+    ;Calculate more relevant quantities
+    beta = (GAMMA_GAMMA-OMEGA_GAMMA^2/OMEGA_OMEGA)/2d0
+    gamma = (OMEGA_GAMMA*OMEGA_TAU/OMEGA_OMEGA-GAMMA_TAU)
+    if min(beta,/nan) lt 0 then message, 'Ill-defined value for beta !'
+    
+    ;Update optimal distance and RV
+    d_opt = (sqrt(gamma^2d0+32d0*beta)-gamma)/(4d0*beta)
+    rv_opt = (4d0-GAMMA_GAMMA*d_opt^2+GAMMA_TAU*d_opt)/(OMEGA_GAMMA*d_opt)
+  ;endif else begin
+  ;  precision_matrix_inflated = !NULL
+  ;endelse
+  
   erv_opt = 1d0/sqrt(OMEGA_OMEGA)
   ed_opt = 1d0/sqrt(GAMMA_GAMMA)
   
   ;Calculate probabilities
   zeta = (TAU_TAU-OMEGA_TAU^2/OMEGA_OMEGA)/2d0
   xarg = gamma/sqrt(2d0*beta)
+  
   ln_P_coeff = -0.5d0*alog(OMEGA_OMEGA)-2.5d0*alog(beta)+0.5d0*alog(determ_precision)
+  
+  ;;Modification JG Sep 10 2020 to have absolute LN Ps that dont necessarily need to be normalized
+  ;; Edited out because I am missing Jacobian terms that are a complex function of ra and dec (Appendix A of BANYAN Sigma paper)
+  ;ln_P_coeff = -0.5d0*alog(OMEGA_OMEGA)-2.5d0*alog(beta)+0.5d0*alog(determ_precision)-2.5d0*alog(!dpi)
+  
   ln_P_part1 = xarg^2/2d0 - zeta
   ln_P_part2 = alog(parabolic_cylinder_function(-5L, xarg, /FPRIME)>1d-318)
   ln_P = ln_P_coeff + ln_P_part1 + ln_P_part2
@@ -349,13 +366,22 @@ Function banyan_sigma_solve_multivar, ra, dec, pmra, pmdec, epmra, epmdec, PRECI
   
   ;Calculate mahalanobis distance between optimal position and the multivariate Gaussian model
   vec = XYZUVW - TAU_vector
-  mahalanobis = sqrt(inner_product_multi_variablemetric(vec, vec, precision_matrix_inflated))
+  if precision_matrix_inflated eq !NULL then $
+    mahalanobis = sqrt(inner_product_multi(vec, vec, precision_matrix)) $
+  else $
+    mahalanobis = sqrt(inner_product_multi_variablemetric(vec, vec, precision_matrix_inflated))
   
   XYZ_sep = sqrt(total((XYZUVW[*,0:2]-TAU_vector[*,0:2])^2,2,/nan))
   UVW_sep = sqrt(total((XYZUVW[*,3:*]-TAU_vector[*,3:*])^2,2,/nan))
   
-  XYZ_sig = sqrt(inner_product_multi_variablemetric(vec[*,0:2], vec[*,0:2], precision_matrix_inflated[*,0:2,0:2]))
-  UVW_sig = sqrt(inner_product_multi_variablemetric(vec[*,3:5], vec[*,3:5], precision_matrix_inflated[*,3:5,3:5]))
+  if precision_matrix_inflated eq !NULL then begin
+    XYZ_sig = sqrt(inner_product_multi(vec[*,0:2], vec[*,0:2], precision_matrix[0:2,0:2]))
+    UVW_sig = sqrt(inner_product_multi(vec[*,3:5], vec[*,3:5], precision_matrix[3:5,3:5]))
+  endif else begin
+    XYZ_sig = sqrt(inner_product_multi_variablemetric(vec[*,0:2], vec[*,0:2], precision_matrix_inflated[*,0:2,0:2]))
+    UVW_sig = sqrt(inner_product_multi_variablemetric(vec[*,3:5], vec[*,3:5], precision_matrix_inflated[*,3:5,3:5]))
+  endelse
+  
   
   ;Create an output structure
   output_structure = {LN_P:!values.d_nan, D_OPT:!values.d_nan, RV_OPT:!values.d_nan, ED_OPT:!values.d_nan, ERV_OPT:!values.d_nan, $

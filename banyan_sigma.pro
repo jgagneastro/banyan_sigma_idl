@@ -4,7 +4,10 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
   PSIRA=psira,PSIDEC=psidec,EPSIRA=epsira,EPSIDEC=epsidec, PLX=plx, EPLX=eplx, $
   CONSTRAINT_DIST_PER_HYP=constraint_dist_per_hyp, CONSTRAINT_EDIST_PER_HYP=constraint_edist_per_hyp, $
   USE_RV=use_rv, USE_DIST=use_dist, USE_PLX=use_plx, USE_PSI=use_psi, OVERRIDE_ERRORS=override_errors, $
-  STRUC=s, CUSTOM_MODELS=custom_models, NORM_OUTPUT_NOPRIOR=norm_output, NORM_OUTPUT_PRIOR=norm_output_prior
+  STRUC=s, CUSTOM_MODELS=custom_models, NORM_OUTPUT_NOPRIOR=norm_output, NORM_OUTPUT_PRIOR=norm_output_prior, $
+  PURE_LNP_ONLY=pure_lnp_only, RETURN_PARAMETERS=return_parameters, NO_NORMALIZATION=no_normalization, $
+  CONSTRAINT_RV_PER_HYP=constraint_rv_per_hyp, CONSTRAINT_ERV_PER_HYP=constraint_erv_per_hyp, $
+  NEW_MODELS=new_models, NORHEA_NEW=norhea_new, MOCA_BSMDID=moca_bsmdid, MONTE_CARLO=monte_carlo, RESTRAINED_DISTANCE_RANGE=restrained_distance_range
   
   ;+
   ; NAME:
@@ -138,6 +141,9 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
   ;                   error on the distance constraint (in pc). Each of the Bayesian hypotheses must be included as structure tags and the
   ;                   distance error must be specified as its associated scalar value.
   ;       CUSTOM_MODELS - An IDL structure array with custom kinematic models to be used by BANYAN Sigma.
+  ;       RESTRAINED_DISTANCE_RANGE - A two-elements IDL array to specify a range of distances outside of which the probabilities will not be calculated.
+  ;                                   This can speed things up considerably when using a large number of BANYAN Sigma models.
+  ;                                   This can be a 2xN-elements array for star-specific distance ranges, with N star. 
   ;       STRUC - (Output keyword) stores the kinematic data used by BANYAN Sigma in an IDL structure array.  
   ;       NORM_OUTPUT_NOPRIOR - (Output keyword) stores the normalized probabilities without priors
   ;       NORM_OUTPUT_PRIOR - (Output keyword) stores the normalized probabilities with priors
@@ -145,6 +151,7 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
   ; OPTIONAL INPUT KEYWORD:
   ;       /UNIT_PRIORS - If this keyword is set, all default priors are set to 1 (but they are still overrided by manual priors input with the keyword LN_PRIORS).
   ;       /LNP_ONLY - If this keyword is set, only Bayesian probabilities will be calculated and returned.
+  ;       /PURE_LNP_ONLY - If this keyword is set, only non-normalized Bayesian probabilities will be calculated and returned and no priors will be applied.
   ;       /NO_XYZ - If this keyword is set, the width of the spatial components of the multivariate Gaussian will be widened by a large
   ;                 factor, so that the XYZ components are effectively ignored. This keyword must be used with extreme caution as it will
   ;                 generate a significant number of false-positives and confusion between the young associations.
@@ -391,19 +398,42 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
     parameters_str = custom_models
     parameters_str.name = strtrim(parameters_str.name,2)
   endif else begin
-    ;Locate the parameters file
-    parameters_file = file_dirname(routine_filepath())+path_sep()+'data'+path_sep()+'banyan_sigma_parameters.fits'
-    if ~file_test(parameters_file) then $
-      message, ' The multivariate Gaussian parameters file could not be found ! Please make sure that you did not move "'+path_sep()+'data'+path_sep()+'banyan_sigma_parameters.fits" from the same path as the IDL routine banyan_sigma.pro !', continue=keyword_set(override_errors)
-    ;Read the multivariate Gaussian parameters describing the spatial-kinematic structure of all hypotheses
-    parameters_str = mrdfits(parameters_file,1,/silent)
-    parameters_str.name = strtrim(parameters_str.name,2)
+;    ;Locate the parameters file
+;    parameters_file = file_dirname(routine_filepath())+path_sep()+'data'+path_sep()+'banyan_sigma_parameters.fits'
+;    if ~file_test(parameters_file) then $
+;      message, ' The multivariate Gaussian parameters file could not be found ! Please make sure that you did not move "'+path_sep()+'data'+path_sep()+'banyan_sigma_parameters.fits" from the same path as the IDL routine banyan_sigma.pro !', continue=keyword_set(override_errors)
+;    ;Read the multivariate Gaussian parameters describing the spatial-kinematic structure of all hypotheses
+;    parameters_str = mrdfits(parameters_file,1,/silent)
+;    parameters_str.name = strtrim(parameters_str.name,2)
+    ;Attempt to read models directly from the MOCA database
+    if keyword_set(moca_bsmdid) then begin
+      parameters_str = moca_bsigma_models(moca_bsmdid)
+    endif else begin
+      if keyword_set(norhea_new) then begin
+        parameters_str = moca_bsigma_models(/latest)
+        bad = where(strpos(parameters_str.name,'RHEA') ne -1L, nbad)
+        if nbad ne 0L then remove, bad, parameters_str
+      endif else begin
+        if keyword_set(new_models) then $
+          parameters_str = moca_bsigma_models(/latest) else $
+          parameters_str = moca_bsigma_models(/original)
+      endelse
+    endelse
   endelse
   npar = n_elements(parameters_str)
+  
+  if keyword_set(restrained_distance_range) then begin
+    if (size(restrained_distance_range))[0] eq 1 then $
+      restrained_distance_range = (restrained_distance_range#make_array(nobj,value=1d0,/double))
+    if max(tag_names(parameters_str) eq 'DISTANCE_MIN') eq 0 or max(tag_names(parameters_str) eq 'DISTANCE_MAX') eq 0 then $
+      message, ' If the RESTRAINED_DISTANCE_RANGE keyword is used, the models must include tags named DISTANCE_MIN and DISTANCE_MAX'
+  endif
+    
   
   ;Replace parameter names that start with a number to avoid problems with using them as structure tags
   bad = where(is_number(strmid(parameters_str.NAME,0,1)), nbad)
   if nbad ne 0L then parameters_str[bad].NAME = '_'+parameters_str[bad].NAME
+  if keyword_set(return_parameters) then return, parameters_str
   
   ;Build a list of the default hypotheses to be considered
   if ~keyword_set(hypotheses) then $
@@ -413,6 +443,10 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
   ;Replace hypothesis names that start with a number to avoid problems with using them as structure tags
   bad = where(is_number(strmid(hypotheses,0,1)), nbad)
   if nbad ne 0L then hypotheses[bad] = '_'+hypotheses[bad]
+  
+  ;Determine whether a trigonometric distance was set
+  distance_is_set = finite(s.dist)  
+  rv_is_set = finite(s.rv)
   
   ;If CONSTRAINT_DIST_PER_HYP is set, check that all hypotheses are included
   if keyword_set(constraint_dist_per_hyp) then begin
@@ -446,20 +480,58 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
     if nbad ne 0L then $
       message, ' Some of the specified CONSTRAINT_EDIST_PER_HYP are not finite where CONSTRAINT_DIST_PER_HYP are finite !', continue=keyword_set(override_errors)
     
+    good = where(max(finite(dist_per_hyp_arr),dim=2L,/nan), ngood)
+    if ngood ne 0L then distance_is_set[good] = 1
+  endif
+  
+  ;If CONSTRAINT_DIST_PER_RV is set, check that all hypotheses are included
+  if keyword_set(constraint_rv_per_hyp) then begin
+    rv_per_hyp_tags = tag_names(constraint_rv_per_hyp)
+    erv_per_hyp_tags = tag_names(constraint_erv_per_hyp)
+    if ~array_equal(rv_per_hyp_tags[sort(rv_per_hyp_tags)],hypotheses[sort(hypotheses)]) or ~array_equal(erv_per_hyp_tags[sort(rv_per_hyp_tags)],hypotheses[sort(hypotheses)]) then begin
+      print, ' The tag names of CONSTRAINT_RV_PER_HYP are not equal to the set of hypotheses :'
+      print, transpose('  '+hypotheses)
+      message, ' Please correct the tag names appropriately', continue=keyword_set(override_errors)
+    endif
+
+    ;Build CONSTRAINT_RV_PER_HYP into an array
+    rv_per_hyp_arr = make_array(nobj,nhyp,value=!values.d_nan,/double)
+    erv_per_hyp_arr = make_array(nobj,nhyp,value=!values.d_nan,/double)
+    for i=0L, nhyp-1L do begin
+      gtag = where(rv_per_hyp_tags eq hypotheses[i] or rv_per_hyp_tags eq '_'+hypotheses[i], ngtag)
+      if ngtag ne 0L then $
+        rv_per_hyp_arr[*,i] = double(constraint_rv_per_hyp.(gtag[0L]))
+    endfor
+    for i=0L, nhyp-1L do begin
+      gtag = where(erv_per_hyp_tags eq hypotheses[i] or erv_per_hyp_tags eq '_'+hypotheses[i], ngtag)
+      if ngtag ne 0L then $
+        erv_per_hyp_arr[*,i] = double(constraint_erv_per_hyp.(gtag[0L]))
+    endfor
+
+    ;Check that all RV constraints are physical
+    bad = where(erv_per_hyp_arr le 0., nbad)
+    if nbad ne 0L then $
+      message, ' Some of the specified CONSTRAINT_ERV_PER_HYP values are unphysical !', continue=keyword_set(override_errors)
+
+    ;Check that the CONSTRAINT_ERV_PER_HYP values are finite everywhere that CONSTRAINT_RV_PER_HYP are finite
+    bad = where(finite(rv_per_hyp_arr) and ~finite(erv_per_hyp_arr), nbad)
+    if nbad ne 0L then $
+      message, ' Some of the specified CONSTRAINT_ERV_PER_HYP are not finite where CONSTRAINT_RV_PER_HYP are finite !', continue=keyword_set(override_errors)
+    
+    good = where(max(finite(rv_per_hyp_arr),dim=2L,/nan), ngood)
+    if ngood ne 0L then rv_is_set[good] = 1
+    
   endif
   
   ;Override priors to all ones if UNIT_PRIORS is set
   if keyword_set(unit_priors) then $
     parameters_str.ln_prior = 0d0
   
-  ;Determine whether a trigonometric distance was set 
-  distance_is_set = finite(s.dist)
-  
   ;Adjust the priors
-  g_pm = where(~finite(s.rv) and ~distance_is_set, ng_pm)
-  g_pm_rv = where(finite(s.rv) and ~distance_is_set, ng_pm_rv)
-  g_pm_dist = where(~finite(s.rv) and distance_is_set, ng_pm_dist)
-  g_pm_rv_dist = where(finite(s.rv) and distance_is_set, ng_pm_rv_dist)
+  g_pm = where(~rv_is_set and ~distance_is_set, ng_pm)
+  g_pm_rv = where(rv_is_set and ~distance_is_set, ng_pm_rv)
+  g_pm_dist = where(~rv_is_set and distance_is_set, ng_pm_dist)
+  g_pm_rv_dist = where(rv_is_set and distance_is_set, ng_pm_rv_dist)
   ln_priors_nd = make_array(nobj,nhyp,value=0d0,/double)
   ln_priors_nd_manual = make_array(nobj,nhyp,value=0d0,/double)
   for i=0L, nhyp-1L do begin
@@ -467,8 +539,10 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
     if strpos(strupcase(hypotheses[i]),'FIELD') ne -1L then continue
     ;Read the parameters structure to identify the 4 priors associated with a given young association
     ind = where(strtrim(strlowcase(parameters_str.name),2) eq strtrim(strlowcase(hypotheses[i]),2) or '_'+strtrim(strlowcase(parameters_str.name),2) eq strtrim(strlowcase(hypotheses[i]),2), nfi)
-    if nfi ne 1 then $
-      message, ' Hypothesis '+hypotheses[i]+' could not be found in the parameters structure !'
+    if nfi eq 0 then begin
+      if nfi eq 0 then message, ' Hypothesis '+hypotheses[i]+' could not be found in the parameters structure !', /continue
+      ;continue
+    endif
     ln_priors_i = parameters_str[ind[0L]].LN_PRIOR
     ;In the cases where only one prior is designated, assign it to all stars
     if n_elements(ln_priors_i) eq 1L then $
@@ -558,6 +632,17 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
       endif
     endif
     
+    ;If CONSTRAINT_RV_PER_HYP is set, determine which distance constraint must be used now
+    rv_for_this_hypothesis = s.rv
+    erv_for_this_hypothesis = s.erv
+    if keyword_set(constraint_rv_per_hyp) then begin
+      grv_per_hyp = where(finite(rv_per_hyp_arr[*,i]), ngrv_per_hyp)
+      if ngrv_per_hyp ne 0L then begin
+        rv_for_this_hypothesis[grv_per_hyp] = rv_per_hyp_arr[grv_per_hyp,i]
+        erv_for_this_hypothesis[grv_per_hyp] = erv_per_hyp_arr[grv_per_hyp,i]
+      endif
+    endif
+    
     ;Loop on individual multivariate gaussians, if needed
     output_str_multimodel = !NULL
     if keyword_set(lnp_only) then $
@@ -580,12 +665,39 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
         s_ci = s[ind_from:ind_to]
         dist_for_this_hypothesis_ci = dist_for_this_hypothesis[ind_from:ind_to]
         edist_for_this_hypothesis_ci = edist_for_this_hypothesis[ind_from:ind_to]
+        rv_for_this_hypothesis_ci = rv_for_this_hypothesis[ind_from:ind_to]
+        erv_for_this_hypothesis_ci = erv_for_this_hypothesis[ind_from:ind_to]
         nobj_ci = n_elements(s_ci)
         
         ;Solve the BANYAN-SIGMA integrals for one hypothesis and N targets
-        output_str_ci = banyan_sigma_solve_multivar(s_ci.ra, s_ci.dec, s_ci.pmra, s_ci.pmdec, s_ci.epmra, s_ci.epmdec, RV_MES=s_ci.rv, ERV_MES=s_ci.erv, $
-          DIST_MES=dist_for_this_hypothesis_ci, EDIST_MES=edist_for_this_hypothesis_ci, ASSOCIATION_STRUCTURE=association_structure, PSIRA=s_ci.psira, $
-          PSIDEC=s_ci.psidec, EPSIRA=s_ci.epsira, EPSIDEC=s_ci.epsidec, LNP_ONLY=lnp_only, NO_XYZ=no_xyz)
+;        print, strtrim(association_structure.name,2)
+;        print, rv_for_this_hypothesis_ci
+;        print, erv_for_this_hypothesis_ci
+        
+        ;if strtrim(association_structure.name,2) eq 'THEIA2007' then stop
+        if (keyword_set(restrained_distance_range) and strtrim(association_structure.name,2) ne 'FIELD') then begin
+          ;Here prepare an empty output_str_ci and only fill the values for the objects which need a calculation given the restrained distance ranges
+          g_select_stars = where(association_structure.DISTANCE_MIN le reform(restrained_distance_range[1,*]) and association_structure.DISTANCE_MAX ge reform(restrained_distance_range[0,*]), ng_select_stars)
+          
+          nan = !values.d_nan
+          if ~keyword_set(output_str_ci_model) then $
+            output_str_ci_model = create_struct('LN_P',nan,'D_OPT',nan,'RV_OPT',nan,'ED_OPT',nan,'ERV_OPT',nan,'XYZUVW',replicate(nan,6),'EXYZUVW',replicate(nan,6),'XYZ_SEP',nan,'UVW_SEP',nan,'XYZ_SIG',nan,'UVW_SIG',nan,'MAHALANOBIS',nan)
+          
+;          ;Create a general output structure if it does not exist
+;          if ~keyword_set(output_str) then $
+;            output_str = replicate(output_str_ci_model, nobj)
+          
+          output_str_ci = replicate(output_str_ci_model, n_elements(s_ci))
+          
+          if ng_select_stars ne 0 then $
+            output_str_ci[g_select_stars] = banyan_sigma_solve_multivar(s_ci[g_select_stars].ra, s_ci[g_select_stars].dec, s_ci[g_select_stars].pmra, s_ci[g_select_stars].pmdec, s_ci[g_select_stars].epmra, s_ci[g_select_stars].epmdec, RV_MES=rv_for_this_hypothesis_ci[g_select_stars], ERV_MES=erv_for_this_hypothesis_ci[g_select_stars], $
+              DIST_MES=dist_for_this_hypothesis_ci[g_select_stars], EDIST_MES=edist_for_this_hypothesis_ci[g_select_stars], ASSOCIATION_STRUCTURE=association_structure, PSIRA=s_ci[g_select_stars].psira, $
+              PSIDEC=s_ci[g_select_stars].psidec, EPSIRA=s_ci[g_select_stars].epsira, EPSIDEC=s_ci[g_select_stars].epsidec, LNP_ONLY=lnp_only, NO_XYZ=no_xyz, MONTE_CARLO=monte_carlo)
+        endif else begin
+          output_str_ci = banyan_sigma_solve_multivar(s_ci.ra, s_ci.dec, s_ci.pmra, s_ci.pmdec, s_ci.epmra, s_ci.epmdec, RV_MES=rv_for_this_hypothesis_ci, ERV_MES=erv_for_this_hypothesis_ci, $;, RV_MES=s_ci.rv, ERV_MES=s_ci.erv, $
+            DIST_MES=dist_for_this_hypothesis_ci, EDIST_MES=edist_for_this_hypothesis_ci, ASSOCIATION_STRUCTURE=association_structure, PSIRA=s_ci.psira, $
+            PSIDEC=s_ci.psidec, EPSIRA=s_ci.epsira, EPSIDEC=s_ci.epsidec, LNP_ONLY=lnp_only, NO_XYZ=no_xyz, MONTE_CARLO=monte_carlo)
+        endelse
         
         if keyword_set(lnp_only) then begin
           all_lnprobs_hypi[ind_from:ind_to,gaussi] = output_str_ci
@@ -605,7 +717,7 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
       endfor;End of loop on chunks of data that avoids RAM saturation
       output_str_sci = !NULL
       s_ci = !NULL
-
+      
       ;Skip the structure management if only a minimal output is required
       if keyword_set(lnp_only) then $
         continue
@@ -642,18 +754,28 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
       output_str = replicate(output_str, nobj)
       weights = parameters_str[ind].coefficient/total(parameters_str[ind].coefficient,/nan)
       weights2D = make_array(nobj,value=1d0,/double)#weights
+      ;lnP is the weighted sum with the model coefficients
       output_str.LN_P = alog_sum_2d(alog(weights2D)+output_str_multimodel.LN_P,dim=2L)
-      output_str.D_OPT = total(weights2D*output_str_multimodel.D_OPT,2L,/nan)
-      output_str.ED_OPT = total(weights2D*output_str_multimodel.ED_OPT,2L,/nan)
-      output_str.RV_OPT = total(weights2D*output_str_multimodel.RV_OPT,2L,/nan)
-      output_str.ERV_OPT = total(weights2D*output_str_multimodel.ERV_OPT,2L,/nan)
-      output_str.XYZ_SEP = total(weights2D*output_str_multimodel.XYZ_SEP,2L,/nan)
-      output_str.UVW_SEP = total(weights2D*output_str_multimodel.UVW_SEP,2L,/nan)
-      output_str.XYZ_SIG = total(weights2D*output_str_multimodel.XYZ_SIG,2L,/nan)
-      output_str.UVW_SIG = total(weights2D*output_str_multimodel.UVW_SIG,2L,/nan)
-      output_str.MAHALANOBIS = total(weights2D*output_str_multimodel.MAHALANOBIS,2L,/nan)
+      ;2023 April 18: Other quantities are the weighted sum with the model coefficients AND the lnP. If a star is a clear member of one sub-Gaussian
+      ; and not of the others, it is the d_opt, etc. of that particular Gaussian we want to know about
+      logweights_coeff_lnp = alog(weights2D)+output_str_multimodel.LN_P
+      logweights_coeff_lnp -= alog_sum_2d(logweights_coeff_lnp,dim=2L)#make_array(ngauss,value=1d0,/double)
+      weights_coeff_lnp = exp(logweights_coeff_lnp)
+      output_str.D_OPT = total(weights_coeff_lnp*output_str_multimodel.D_OPT,2L,/nan)
+      output_str.ED_OPT = total(weights_coeff_lnp*output_str_multimodel.ED_OPT,2L,/nan)
+      output_str.RV_OPT = total(weights_coeff_lnp*output_str_multimodel.RV_OPT,2L,/nan)
+      output_str.ERV_OPT = total(weights_coeff_lnp*output_str_multimodel.ERV_OPT,2L,/nan)
+      output_str.XYZ_SEP = total(weights_coeff_lnp*output_str_multimodel.XYZ_SEP,2L,/nan)
+      output_str.UVW_SEP = total(weights_coeff_lnp*output_str_multimodel.UVW_SEP,2L,/nan)
+      output_str.XYZ_SIG = total(weights_coeff_lnp*output_str_multimodel.XYZ_SIG,2L,/nan)
+      output_str.UVW_SIG = total(weights_coeff_lnp*output_str_multimodel.UVW_SIG,2L,/nan)
+      output_str.MAHALANOBIS = total(weights_coeff_lnp*output_str_multimodel.MAHALANOBIS,2L,/nan)
+      for compi=0L, 5L do $
+        output_str.XYZUVW[compi] = total(weights_coeff_lnp*output_str_multimodel.XYZUVW[compi],2L,/nan)
+      for compi=0L, 5L do $
+        output_str.EXYZUVW[compi] = total(weights_coeff_lnp*output_str_multimodel.EXYZUVW[compi],2L,/nan)
     endif
-    output_str_multimodel = !NULL
+    ;output_str_multimodel = !NULL
 
     ;Create an output structure for all hypotheses and targets
     if ~keyword_set(output_str_all) then begin
@@ -664,9 +786,15 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
 
     ;Store all
     output_str_all[*,i] = output_str
-    output_str = !NULL
+    ;output_str = !NULL
     
   endfor
+  
+  if keyword_set(lnp_only) and keyword_set(no_normalization) then begin
+    if ~keyword_set(ln_priors_nd) then $
+      ln_priors_nd = 1.
+    return, all_lnprobs+ln_priors_nd
+  endif
   
   ;Useful shortcuts to calculate normalized probabilities
   hvec = make_array(nhyp,value=1d0,/double)
@@ -695,6 +823,9 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
     ln_prior_moving_groups = alog_sum_2d(ln_priors_nd[*,yind]+ln_norm_output_only_ymg,dim=2L)
   endelse
   
+  bad = where(~finite(ln_priors_nd[*,yind]), nbad)
+  if nbad ne 0L then message, ' Some priors are infinite !'
+  
   ;Weight the priors w/r/t the Bayesian probabilities and project these priors onto the field. This is a way to
   ; avoid having the priors change the relative moving group probabilities, as their goal is strictly to
   ; maximize young association vs FIELD classification performance
@@ -705,6 +836,9 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
   ln_norm_output_prior = ln_P_with_prior-(alog_sum_2d(ln_P_with_prior,dim=2L)#hvec)
   
   ;Return log probabilities if this is the only required output
+  if keyword_set(pure_lnp_only) then $
+    return, all_lnprobs
+  
   if keyword_set(lnp_only) then $
     return, ln_norm_output_prior
   
@@ -713,10 +847,11 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
   
   ;Read the association performance metrics
   ;Locate the parameters file
-  metrics_file = file_dirname(routine_filepath())+path_sep()+'data'+path_sep()+'banyan_sigma_metrics.fits'
+  ;metrics_file = file_dirname(routine_filepath())+path_sep()+'data'+path_sep()+'banyan_sigma_metrics.fits'
+  metrics_file = file_dirname(routine_filepath())+path_sep()+'DUMMY.fits'
   metrics_computed = 0
-  if ~file_test(metrics_file) then $
-    message, ' The performance metrics file could not be found ! Performance metrics will not be calculated. Please make sure that you did not move "'+os.sep+'data'+os.sep+'banyan_sigma_metrics.fits" from the same path as the IDL file banyan_sigma.pro !', /continue
+  ;if ~file_test(metrics_file) then $
+  ;  message, ' The performance metrics file could not be found ! Performance metrics will not be calculated. Please make sure that you did not move "'+path_sep()+'data'+path_sep()+'banyan_sigma_metrics.fits" from the same path as the IDL file banyan_sigma.pro !', /continue
   ;Avoid computing biased metrics if the unit_priors keyword was set
   if file_test(metrics_file) and ~keyword_set(unit_priors) then begin 
     metrics_str = mrdfits(metrics_file,1,/silent)
@@ -790,13 +925,25 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
   ;Create a list of non-field hypotheses
   nn = !values.d_NAN
   hypotheses2 = strupcase(hypotheses[yind])
+  ;TEST: Dec 14 2020 improving this part
   ;Create an output structure that will receive all data
-  void = execute('sout = replicate({NAME:''NaN'', ALL:{'+strjoin(strupcase(hypotheses)+':nn',', ')+'}, '+$
-    'METRICS:{TPR:nn,FPR:nn,PPV:nn,NFP:nn}, '+$
-    strjoin(strupcase([hypotheses,'BESTYA_STR'])+':{HYPOTHESIS:''NaN'',PROB:nn, D_OPT:nn, ED_OPT:nn, RV_OPT:nn, ERV_OPT:nn, '+$
-    'XYZUVW:replicate(nn,6), EXYZUVW:replicate(nn,6), XYZ_SEP:nn, UVW_SEP:nn, XYZ_SIG:nn, UVW_SIG:nn, MAHALANOBIS:nn}',', ')+$
-    ', YA_PROB:nn, LIST_PROB_YAS:''NaN'', BEST_HYP:''NaN'', BEST_YA:''NaN''}, nobj)')
-  if void eq 0 then message, ' An execution statement has failed !'
+;  void = execute('sout = replicate({NAME:''NaN'', ALL:{'+strjoin(strupcase(hypotheses)+':nn',', ')+'}, '+$
+;    'METRICS:{TPR:nn,FPR:nn,PPV:nn,NFP:nn}, '+$
+;    strjoin(strupcase([hypotheses,'BESTYA_STR'])+':{HYPOTHESIS:''NaN'',PROB:nn, D_OPT:nn, ED_OPT:nn, RV_OPT:nn, ERV_OPT:nn, '+$
+;    'XYZUVW:replicate(nn,6), EXYZUVW:replicate(nn,6), XYZ_SEP:nn, UVW_SEP:nn, XYZ_SIG:nn, UVW_SIG:nn, MAHALANOBIS:nn}',', ')+$
+;    ', YA_PROB:nn, LIST_PROB_YAS:''NaN'', BEST_HYP:''NaN'', BEST_YA:''NaN''}, nobj)')
+;  if void eq 0 then message, ' An execution statement has failed !'
+  subs = {HYPOTHESIS:'NaN',PROB:nn, D_OPT:nn, ED_OPT:nn, RV_OPT:nn, ERV_OPT:nn, XYZUVW:replicate(nn,6), EXYZUVW:replicate(nn,6), XYZ_SEP:nn, UVW_SEP:nn, XYZ_SIG:nn, UVW_SIG:nn, MAHALANOBIS:nn}
+  sall = !NULL
+  for si=0L, n_elements(hypotheses)-1L do $
+    sall = CREATE_STRUCT(sall, strupcase(hypotheses[si]), nn)
+  metrics_str = {TPR:nn,FPR:nn,PPV:nn,NFP:nn}
+  sout = {NAME:'NaN', ALL:sall, METRICS:metrics_str}
+  for si=0L, n_elements(hypotheses)-1L do $
+    sout = CREATE_STRUCT(temporary(sout), strupcase(hypotheses[si]), subs)
+  sout = CREATE_STRUCT(temporary(sout), 'BESTYA_STR', subs, 'YA_PROB', nn, 'LIST_PROB_YAS', 'NaN', 'BEST_HYP', 'NaN', 'BEST_YA', 'NaN')
+  sout = replicate(sout, nobj)
+  ;ENDTEST
 
   ;Fill up basic output info in the structure
   ;Name of target
@@ -816,6 +963,7 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
   
   ;Fill up all associations sub-structures
   bbad = []
+  void = 1
   for i=0L, nhyp-1L do begin
     h = hypotheses[i]
     ;Probability in list of all YMG probs
@@ -849,10 +997,11 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
     void *= execute('sout.'+h+'.MAHALANOBIS = output_str_all[*,i].MAHALANOBIS')
     if void eq 0 then message, ' An execution statement has failed !'
     nbad = 0L
-    ;Flag objects with NaN probabilities
-    void *= execute('bad = where(~finite(sout.'+h+'.PROB), nbad)')
-    if void eq 0 then message, ' An execution statement has failed !'
-    if nbad ne 0L then bbad = [bbad, bad]
+    ;This was de-commissionned because it does not play well with RESTRAINED_DISTANCE_RANGE
+;    ;Flag objects with NaN probabilities
+;    void *= execute('bad = where(~finite(sout.'+h+'.PROB), nbad)')
+;    if void eq 0 then message, ' An execution statement has failed !'
+;    if nbad ne 0L then bbad = [bbad, bad]
   endfor
   ;norm_output = !NULL
   ;norm_output_prior = !NULL
@@ -883,15 +1032,17 @@ Function banyan_sigma, stars_data, COLUMN_NAMES=column_names, HYPOTHESES=hypothe
   endfor
   norm_output2 = !NULL
 
-  ;Fix the results of objects that have NaN probabilities
-  if n_elements(bbad) ne 0L then begin
-    sout[bbad].BEST_HYP = 'NaN'
-    sout[bbad].YA_PROB = !values.f_nan
-    for i=0L, nhyp-1 do begin
-      void = execute('sout[bbad].'+hypotheses[i]+'.PROB = !values.f_nan')
-      if void eq 0 then message, ' An execution statement has failed !'
-    endfor
-  endif
+  ;This was de-commissionned because it does not play well with RESTRAINED_DISTANCE_RANGE
+;  ;Fix the results of objects that have NaN probabilities
+;  stop
+;  if n_elements(bbad) ne 0L then begin
+;    sout[bbad].BEST_HYP = 'NaN'
+;    sout[bbad].YA_PROB = !values.f_nan
+;    for i=0L, nhyp-1 do begin
+;      void = execute('sout[bbad].'+hypotheses[i]+'.PROB = !values.f_nan')
+;      if void eq 0 then message, ' An execution statement has failed !'
+;    endfor
+;  endif
   
   ;Return the structure that contains all information on membership probabilities
   return, sout
